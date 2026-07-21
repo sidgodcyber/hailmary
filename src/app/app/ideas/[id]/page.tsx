@@ -15,23 +15,26 @@ export default async function IdeaDetail({ params }: { params: Promise<{ id: str
   await requireAuth();
   const supabase = await createClient();
 
-  const { data: idea } = await supabase
-    .from("ideas")
-    .select(
-      "*, author:profiles!ideas_author_id_fkey(full_name, email), brief_editor:profiles!ideas_brief_updated_by_fkey(full_name, email)"
-    )
-    .eq("id", id)
-    .maybeSingle();
+  // idea and its comments both key off the route param — fetch in parallel.
+  const [ideaRes, commentRes] = await Promise.all([
+    supabase
+      .from("ideas")
+      .select(
+        "*, author:profiles!ideas_author_id_fkey(full_name, email), brief_editor:profiles!ideas_brief_updated_by_fkey(full_name, email)"
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("comments")
+      .select("id, body, created_at, author:profiles!comments_author_id_fkey(full_name, email)")
+      .eq("parent_type", "idea")
+      .eq("parent_id", id)
+      .order("created_at", { ascending: true }),
+  ]);
 
+  const idea = ideaRes.data;
   if (!idea) notFound();
-
-  const { data: commentData } = await supabase
-    .from("comments")
-    .select("id, body, created_at, author:profiles!comments_author_id_fkey(full_name, email)")
-    .eq("parent_type", "idea")
-    .eq("parent_id", id)
-    .order("created_at", { ascending: true });
-  const comments = (commentData ?? []) as unknown as CommentRow[];
+  const comments = (commentRes.data ?? []) as unknown as CommentRow[];
 
   const author = idea.author as { full_name: string | null; email: string } | null;
   const briefEditor = idea.brief_editor as { full_name: string | null; email: string } | null;

@@ -2,6 +2,35 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { initials } from "@/lib/format";
 
+/** A single pulsing placeholder block. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-black/[0.06] ${className}`} />;
+}
+
+/**
+ * Generic page skeleton shown via loading.tsx while a route's data streams in.
+ * A title bar plus a few card-shaped blocks — enough to make navigation feel
+ * instant under free-tier cold starts.
+ */
+export function PageSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-4 w-64 max-w-full" />
+      </div>
+      <div className="space-y-2.5">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="card p-4 space-y-2">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-3/4" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PageHeader({
   title,
   subtitle,

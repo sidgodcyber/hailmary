@@ -29,21 +29,19 @@ export default async function TenantDetail({ params }: { params: Promise<{ id: s
   await requireAdmin();
   const supabase = await createClient();
 
-  const { data: tenant } = await supabase.from("tenants").select("*").eq("id", id).maybeSingle();
-  if (!tenant) notFound();
-
-  const { data: memberData } = await supabase
-    .from("memberships")
-    .select("role, profiles(email, full_name, global_role)")
-    .eq("tenant_id", id);
-  const members = (memberData ?? []) as unknown as Member[];
-
-  const [ideas, tasks, calendar, activity] = await Promise.all([
+  // tenant row, members and all counts key off the route param — one batch.
+  const [tenantRes, memberRes, ideas, tasks, calendar, activity] = await Promise.all([
+    supabase.from("tenants").select("*").eq("id", id).maybeSingle(),
+    supabase.from("memberships").select("role, profiles(email, full_name, global_role)").eq("tenant_id", id),
     count(supabase, "ideas", id),
     count(supabase, "tasks", id),
     count(supabase, "calendar_entries", id),
     count(supabase, "activity", id),
   ]);
+
+  const tenant = tenantRes.data;
+  if (!tenant) notFound();
+  const members = (memberRes.data ?? []) as unknown as Member[];
 
   const stats = [
     { label: "Ideas", value: ideas },

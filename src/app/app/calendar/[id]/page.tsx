@@ -26,22 +26,26 @@ export default async function CalendarDetail({
   await requireAuth();
   const supabase = await createClient();
 
-  const { data: entry } = await supabase
-    .from("calendar_entries")
-    .select(
-      "*, editor:profiles!calendar_entries_updated_by_fkey(full_name, email), creator:profiles!calendar_entries_created_by_fkey(full_name, email)"
-    )
-    .eq("id", id)
-    .maybeSingle();
-  if (!entry) notFound();
+  // entry and its comments both key off the route param — fetch in parallel.
+  const [entryRes, commentRes] = await Promise.all([
+    supabase
+      .from("calendar_entries")
+      .select(
+        "*, editor:profiles!calendar_entries_updated_by_fkey(full_name, email), creator:profiles!calendar_entries_created_by_fkey(full_name, email)"
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("comments")
+      .select("id, body, created_at, author:profiles!comments_author_id_fkey(full_name, email)")
+      .eq("parent_type", "calendar")
+      .eq("parent_id", id)
+      .order("created_at", { ascending: true }),
+  ]);
 
-  const { data: commentData } = await supabase
-    .from("comments")
-    .select("id, body, created_at, author:profiles!comments_author_id_fkey(full_name, email)")
-    .eq("parent_type", "calendar")
-    .eq("parent_id", id)
-    .order("created_at", { ascending: true });
-  const comments = (commentData ?? []) as unknown as CommentRow[];
+  const entry = entryRes.data;
+  if (!entry) notFound();
+  const comments = (commentRes.data ?? []) as unknown as CommentRow[];
 
   const editor = entry.editor as { full_name: string | null; email: string } | null;
   const back = sp.m ? `/app/calendar?m=${sp.m}` : "/app/calendar";

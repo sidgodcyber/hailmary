@@ -30,32 +30,24 @@ export async function getAuthContext(): Promise<AuthContext | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("email, full_name, global_role")
-    .eq("id", user.id)
-    .maybeSingle();
+  // profile (role) and the tenant list are independent — fetch in parallel.
+  // The `tenants` select is RLS-scoped: a client sees only their own tenant(s)
+  // via is_member_of(); an admin sees all via is_admin(). So one query serves
+  // both roles and needs no branch on isAdmin, cutting a round-trip.
+  const [profileRes, tenantsRes, cookieStore] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("email, full_name, global_role")
+      .eq("id", user.id)
+      .maybeSingle(),
+    supabase.from("tenants").select("id, name, slug").order("name"),
+    cookies(),
+  ]);
 
+  const profile = profileRes.data;
   const isAdmin = profile?.global_role === "admin";
+  const tenants = (tenantsRes.data ?? []) as TenantRef[];
 
-  let tenants: TenantRef[] = [];
-  if (isAdmin) {
-    const { data } = await supabase
-      .from("tenants")
-      .select("id, name, slug")
-      .order("name");
-    tenants = data ?? [];
-  } else {
-    const { data } = await supabase
-      .from("memberships")
-      .select("tenants(id, name, slug)")
-      .eq("user_id", user.id);
-    tenants = (data ?? [])
-      .map((row) => row.tenants as unknown as TenantRef)
-      .filter(Boolean);
-  }
-
-  const cookieStore = await cookies();
   const wanted = cookieStore.get(ACTIVE_TENANT_COOKIE)?.value;
   const activeTenant = tenants.find((t) => t.id === wanted) ?? tenants[0] ?? null;
 

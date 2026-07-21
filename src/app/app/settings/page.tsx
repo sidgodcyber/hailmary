@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { APP_NAME } from "@/lib/config";
 import { PageHeader } from "@/components/ui";
+import { Icon } from "@/components/icons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { displayName } from "@/lib/format";
 
@@ -35,20 +36,30 @@ export default async function SettingsPage() {
       </section>
 
       <section className="card p-5">
+        <h2 className="font-semibold mb-1">Your data</h2>
+        <p className="text-sm text-ink-muted mb-3">
+          Your workspace is yours. Download everything — ideas, briefs, tasks,
+          calendar and activity — anytime, as a JSON + readable Markdown + CSV bundle.
+        </p>
+        <a href="/api/export/data" className="btn-primary">
+          <Icon name="download" size={16} /> Export my data
+        </a>
+      </section>
+
+      <section className="card p-5">
         <h2 className="font-semibold mb-2">About your data</h2>
         <div className="space-y-2 text-sm text-ink-muted">
           <p>
-            {APP_NAME} is the shared workspace your studio runs for our collaboration —
-            ideas, briefs, tasks and the content calendar all live here.
+            {APP_NAME} is your shared workspace with your studio — ideas, briefs, tasks
+            and the content calendar all live here.
           </p>
           <p>
-            The workspace and its contents are managed by the studio. If you need a
-            copy of specific material, just ask your studio contact and they can put
-            it together for you.
+            Your data belongs to you. You can export a full copy at any time with the
+            button above — no need to ask anyone.
           </p>
           <p>
             We sign you in with one-time magic links (no passwords), and each workspace
-            is isolated so clients only ever see their own.
+            is isolated so you only ever see your own.
           </p>
         </div>
       </section>

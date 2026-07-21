@@ -28,14 +28,12 @@ we work on together:
 - **Magic links only — no passwords.** You get a one-time link by email (or, since we mostly
   talk on WhatsApp, a link your studio contact sends you). Each link is single-use and expires.
 
-## Who controls the data
+## Your data is yours
 
-- The workspace and its contents are **managed by the studio**. This is the studio's working
-  environment for delivering your social-media work — the ideas, briefs and plans built here
-  are part of that service.
-- **Need a copy of something?** Just ask your studio contact. They can export your workspace
-  (a full JSON + human-readable Markdown + spreadsheet-friendly CSV bundle) and share it with
-  you. There is no self-serve export button inside the app.
+- Everything in your workspace — ideas, briefs, tasks, calendar and activity — **belongs to
+  you**.
+- **One-click export, anytime.** In Settings, tap **"Export my data"** to download a full copy
+  as a JSON + human-readable Markdown + spreadsheet-friendly CSV bundle. No need to ask anyone.
 
 ## How your privacy is respected
 
@@ -47,4 +45,5 @@ we work on together:
   read workspace activity to serve you better. Nothing writes back in through that door, and
   it is not exposed to the public.
 
-_Questions about your data? Ask your studio contact — they can walk you through any of this._
+_Questions about your data? Ask your studio contact anytime — or just export it and see for
+yourself._

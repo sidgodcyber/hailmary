@@ -11,7 +11,17 @@ export type ActivityInput = {
   tenantId: string;
   actorId: string | null;
   verb: string;
-  objectType: "idea" | "reference" | "task" | "calendar" | "comment" | "brief";
+  objectType:
+    | "idea"
+    | "reference"
+    | "task"
+    | "calendar"
+    | "comment"
+    | "brief"
+    | "tenant"
+    | "asset"
+    | "attachment"
+    | "voicenote";
   objectId?: string | null;
   summary: string;
   payload?: Record<string, unknown>;
