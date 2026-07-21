@@ -11,6 +11,6 @@ export const config = {
      * Match everything except Next internals, static assets and the auth
      * callback (which needs to run before a session cookie exists).
      */
-    "/((?!_next/static|_next/image|favicon.ico|auth/callback|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|auth/callback|auth/confirm|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -9,6 +9,31 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  * getUser(), which validates the session with Supabase.
  */
 export async function updateSession(request: NextRequest) {
+  // Rescue auth links that landed on the wrong path. Supabase drops the path
+  // from redirect_to when it doesn't match the Redirect URL allowlist, so a
+  // sign-in link can arrive at "/" carrying ?code= or ?token_hash= that nobody
+  // handles — the user just bounces to /login forever. Route them to the
+  // handler that can actually complete the sign-in.
+  const url = request.nextUrl;
+  const path = url.pathname;
+  const code = url.searchParams.get("code");
+  const tokenHash = url.searchParams.get("token_hash");
+
+  if (tokenHash && path !== "/auth/confirm") {
+    const dest = url.clone();
+    dest.pathname = "/auth/confirm";
+    dest.searchParams.set("type", url.searchParams.get("type") || "magiclink");
+    dest.searchParams.set("next", path === "/" ? "/" : path);
+    return NextResponse.redirect(dest);
+  }
+
+  if (code && path !== "/auth/callback" && path !== "/auth/confirm") {
+    const dest = url.clone();
+    dest.pathname = "/auth/callback";
+    dest.searchParams.set("next", path === "/" ? "/" : path);
+    return NextResponse.redirect(dest);
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -34,14 +59,13 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const path = request.nextUrl.pathname;
   const isProtected = path.startsWith("/app") || path.startsWith("/admin");
 
   if (isProtected && !user) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/login";
+    redirectUrl.searchParams.set("next", path);
+    return NextResponse.redirect(redirectUrl);
   }
 
   return response;
