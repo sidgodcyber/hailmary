@@ -28,17 +28,30 @@ requests hit the Mumbai edge but execute in **iad1 (US-East)**, then talk to Sup
 **Seoul**. A no-DB function still costs ~0.35s. Two ops fixes remain (below). Vercel cold start
 (~1.0s first hit) is inherent to the free tier.
 
-## OPEN — needs the user (blocking real client use)
-1. **Supabase email template** → *Authentication → Emails → Magic Link*, point the link at
-   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink&next=/`. Until this
-   is done, emailed links still loop; workaround is `auth.admin.generateLink` (implicit flow,
-   handled client-side by `/login`).
-2. **Vercel function region** → Project Settings → Functions → set to Mumbai (`bom1`).
-   `"regions"` in `vercel.json` does NOT work on Hobby (it *blocked* deploys — reverted).
-3. **Supabase region** is still `ap-northeast-2` (Seoul). Migrate to `ap-south-1` (Mumbai)
-   while the DB holds only demo data: new project → apply `supabase/migrations/*` in order →
-   `npm run seed` → swap the 3 Supabase env vars locally + in Vercel → re-add Site URL +
-   Redirect URLs (`/**` wildcard) → redeploy.
+## INFRA CUTOVER — DONE & VERIFIED (2026-07-22)
+- **Supabase migrated Seoul → Mumbai.** New project ref **`kxsjwfzceiteqzbjizjv`**
+  (`ap-south-1`). Old Seoul project (`tyqmmerftoogpovbpkve`) **deleted**. Migrations applied,
+  `npm run seed` run, all row counts correct (tenants 1, profiles 2, memberships 1, ideas 2,
+  comments 2, tasks 2, calendar 3, activity 4).
+- **Vercel functions moved to Mumbai** via dashboard (Settings → Functions). Verified:
+  `X-Vercel-Id: bom1::bom1` (was `bom1::iad1`). Compute + DB now co-located next to users.
+- **End-to-end proof**: deployed Gravity API returned live data from the Mumbai DB
+  (`GET /api/export/activity` → `count: 4`).
+- **Email sign-in fixed in code, not config.** Supabase locks email-template editing behind
+  custom SMTP (unavailable — Brevo suspended the account), so `/auth/confirm` can't be reached
+  by email. Instead the browser client now uses `flowType: "implicit"`, so emailed links carry
+  the session in the URL fragment and `/login` handles them client-side — works on any device.
+  See `[[magic-link-flows]]`. `/auth/confirm` + `/auth/callback` remain for later/admin links.
+
+**Still unverified by me:** authed-page timings and the client's emailed-link login — my
+sandbox isn't in India, so those need a human click-through to confirm.
+
+## Email deliverability (known constraint)
+Custom SMTP is OFF; using Supabase's built-in mailer, which is rate-limited (~3-4/hour) and
+fine for a pilot but not for scale. **Brevo is dead** (account permanently suspended, so it
+can't be re-enabled). A different provider is needed before real volume — and enabling any
+custom SMTP also unlocks email-template editing, at which point switching to the stricter
+token-hash flow (`/auth/confirm`) becomes possible.
 
 ## Vercel deploy gotcha (cost ~2 blocked deploys)
 Hobby + private repo = no collaborators, so a deployment whose **commit author** resolves to a
