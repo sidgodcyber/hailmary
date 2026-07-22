@@ -1,6 +1,62 @@
 # Hailmary — Handoff snapshot
 
-_Last refreshed: 2026-07-15._
+_Last refreshed: 2026-07-21 (v1.5 session 1: speed + self-serve export + auth fix)._
+
+## v1.5 SESSION 1 — what shipped (deployed & live)
+- **Self-serve export**: `GET /api/export/data` uses the **RLS-bound** client scoped to the
+  caller's own tenant (a client can only ever export their own workspace). Logs a
+  `data.exported` activity event. Settings has a working "Export my data" button; Settings copy
+  + `DATA.md` rewritten to "your data is yours" — **this deliberately re-reverses the earlier
+  studio-owned policy**; see `[[data-policy-studio-owned]]` (now superseded).
+- **Speed**: `getAuthContext` cut 3 sequential round-trips → 2 (profile ‖ tenants in parallel;
+  the RLS-scoped `tenants` select serves both roles, so the isAdmin branch + memberships join
+  are gone). Idea/calendar detail and admin tenant detail batched into single `Promise.all`s.
+  `loading.tsx` skeletons on every data route via `PageSkeleton` in `components/ui.tsx`.
+- **Magic-link sign-in loop FIXED** (was blocking the real client) — see
+  `[[magic-link-flows]]`. Added `/auth/confirm` (token_hash + `verifyOtp`, works from any
+  browser/device) and a middleware rescue for links landing on the wrong path.
+
+## Measured speed (deployed, warm TTFB)
+| Path | Before | After |
+|---|---|---|
+| `/` redirect | 0.53–0.82s | 0.36–0.37s |
+| `/api/export/activity` (no DB) | 0.44s | 0.35s |
+| `/login` | 0.17–0.21s | 0.13s |
+
+**Residual latency is NOT code-fixable — it's geography.** `X-Vercel-Id: bom1::iad1` proves
+requests hit the Mumbai edge but execute in **iad1 (US-East)**, then talk to Supabase in
+**Seoul**. A no-DB function still costs ~0.35s. Two ops fixes remain (below). Vercel cold start
+(~1.0s first hit) is inherent to the free tier.
+
+## OPEN — needs the user (blocking real client use)
+1. **Supabase email template** → *Authentication → Emails → Magic Link*, point the link at
+   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink&next=/`. Until this
+   is done, emailed links still loop; workaround is `auth.admin.generateLink` (implicit flow,
+   handled client-side by `/login`).
+2. **Vercel function region** → Project Settings → Functions → set to Mumbai (`bom1`).
+   `"regions"` in `vercel.json` does NOT work on Hobby (it *blocked* deploys — reverted).
+3. **Supabase region** is still `ap-northeast-2` (Seoul). Migrate to `ap-south-1` (Mumbai)
+   while the DB holds only demo data: new project → apply `supabase/migrations/*` in order →
+   `npm run seed` → swap the 3 Supabase env vars locally + in Vercel → re-add Site URL +
+   Redirect URLs (`/**` wildcard) → redeploy.
+
+## Vercel deploy gotcha (cost ~2 blocked deploys)
+Hobby + private repo = no collaborators, so a deployment whose **commit author** resolves to a
+different GitHub user is rejected: *"Deployment was blocked … commit author did not have
+contributing access"*. Commits were authored `siddhibaluja06@gmail.com` (→ GitHub `sidgodcyber`)
+but the project belongs to `work0909-debug`. Fixed by setting a repo-local identity:
+`git config --local user.email "305450507+work0909-debug@users.noreply.github.com"`.
+Also: git was authenticating as the wrong gh account — this repo now has
+`credential.https://github.com.helper = !gh auth git-credential` set locally.
+
+## NOT started — v1.5 items 3-5 (fresh session; plan is approved)
+Raw asset tracker, draft-approval + media on calendar (storage bucket + RLS), voicenotes +
+Groq AI summaries. Full spec in the approved plan file
+(`~/.claude/plans/hailmary-build-drifting-narwhal.md`, "Hailmary v1.5" section). Groq key: the
+user said they'd create one; not yet added to env.
+
+---
+_Below: original v1 snapshot._
 
 ## One line
 A multi-tenant, mobile-first client companion portal (Next.js 15 + Supabase) with magic-link
