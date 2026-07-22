@@ -41,9 +41,12 @@ function LoginForm() {
         setStatus("error");
         setMessage(error.message);
       } else {
-        window.location.replace("/");
+        window.location.replace(next.startsWith("/") ? next : "/");
       }
     });
+    // `next` is read from the query string on this same URL; it is stable for
+    // the life of this landing, so a one-shot effect is correct here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -51,7 +54,10 @@ function LoginForm() {
     setStatus("sending");
     setMessage("");
     const supabase = createClient();
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+    // Land back on /login, not /auth/callback: with the implicit flow the
+    // session arrives in the URL fragment, and only client-side code can read
+    // a fragment (browsers never send it to the server).
+    const redirectTo = `${window.location.origin}/login?next=${encodeURIComponent(next)}`;
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: { emailRedirectTo: redirectTo },
