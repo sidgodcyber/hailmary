@@ -178,6 +178,47 @@ that client's full workspace as a zip (`data.json`, `summary.md`, and per-table 
 `GET /api/admin/export/<tenant>`. The route requires an admin session; a client gets `403`.
 See `DATA.md` for the plain-language policy.
 
+## Magic-link sign-in: two flows, and why both exist
+
+There are **two** ways a sign-in link can resolve, and they are not interchangeable:
+
+| Flow | Route | Carries | Works when |
+|---|---|---|---|
+| **PKCE** | `/auth/callback` | `?code=` | Link is opened in the **same browser** that requested it (the in-app `/login` form). Needs a `code_verifier` cookie. |
+| **Implicit** | `/login` (client-side) | `#access_token=` in the URL fragment | Links minted by `auth.admin.generateLink` (the admin **Invite** flow). A server route can never read a fragment. |
+| **Token hash** | `/auth/confirm` | `?token_hash=` | **Any** browser or device. No cookie required. |
+
+**Emailed links must use the token-hash flow.** Clients open email on a phone, usually in
+Gmail's in-app browser — a different browser context from the one that requested the link, so
+the PKCE `code_verifier` cookie is absent and the exchange fails. The symptom is a sign-in
+**loop**: the link appears to do nothing and bounces back to `/login`.
+
+To fix it, set the Supabase **Magic Link** email template
+(*Authentication → Emails → Magic Link*) to point at `/auth/confirm`:
+
+```html
+<h2>Your sign-in link</h2>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink&next=/">Sign in</a></p>
+```
+
+Also add `https://<your-app>/**` (with the `/**` wildcard) to *Authentication → URL
+Configuration → Redirect URLs*, and set **Site URL** to the deployed origin. Without the
+wildcard Supabase silently drops the path and sends users to `/` instead of the auth handler —
+`middleware.ts` now rescues that case by forwarding stray `?code=` / `?token_hash=` to the
+right route, but the allowlist should still be correct.
+
+## Deploying: commit author must own the Vercel project
+
+On the Vercel **Hobby** plan a private repo has no collaborators, so a deployment whose
+**commit author** resolves to a different GitHub user is rejected with *"Deployment was
+blocked … the commit author did not have contributing access"*. Commit as the account that
+owns the Vercel project:
+
+```bash
+git config --local user.name  "<github-username>"
+git config --local user.email "<id>+<github-username>@users.noreply.github.com"   # gh api user --jq .id
+```
+
 ## Delivering magic links over WhatsApp (future)
 
 Clients live on WhatsApp. The admin **Invite** flow already calls Supabase's
