@@ -23,4 +23,20 @@ Add the `/**` wildcard (`https://app.example.com/**`), not just the bare origin.
 now also rescues stray `?code=`/`?token_hash=` on any path by forwarding to the right handler —
 defense in depth, but fix the allowlist too.
 
+## Third trap: Gmail prefetch burns single-use email links (`otp_expired`)
+
+Symptom: emailed magic link fails with `error_code=otp_expired` ("Email link is invalid or
+has expired") even on a seemingly fresh click, while an admin `generateLink` clicked once works
+fine. Cause: Gmail (and security scanners) **pre-fetch** links in emails to scan them. The
+default Supabase email template's link IS the single-use `/auth/v1/verify?token=…` endpoint, so
+the scanner's fetch **consumes the token** before the human taps it. Confirmed the mechanism is
+fine by minting a link and following it with curl — it returns `access_token` (a fresh token
+always works; a pre-fetched one is already spent).
+
+Can't fix via template (OTP-code entry would dodge prefetch, but editing the template needs
+custom SMTP, which this project lacks). Durable options: (a) working SMTP → template shows a
+6-digit `{{ .Token }}` → OTP-code entry (prefetch-proof); (b) admin `generateLink` sent over
+WhatsApp as the primary path (clicked once, promptly; sessions persist for weeks so re-auth is
+rare). `/login` now surfaces the `otp_expired` error clearly instead of a blank form.
+
 Related: [[supabase-admin-links-implicit-flow]] (the earlier half of this lesson).
