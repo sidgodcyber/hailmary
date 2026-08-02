@@ -23,6 +23,25 @@ function LoginForm() {
   // and is unaffected by this.
   useEffect(() => {
     const hash = window.location.hash;
+    const query = window.location.search;
+
+    // Surface an error carried back by the link (in the fragment OR the query)
+    // instead of silently showing a blank form. otp_expired is the common one:
+    // email scanners (Gmail) pre-fetch the single-use link and burn the token
+    // before the human taps it.
+    const errText = `${hash} ${query}`;
+    if (errText.includes("error=") || errText.includes("otp_expired")) {
+      setStatus("error");
+      setMessage(
+        errText.includes("otp_expired") || errText.includes("expired")
+          ? "That sign-in link had already expired or been used. Request a fresh one below and open it right away."
+          : "That sign-in link didn't work. Request a new one below."
+      );
+      // clean the ugly error params out of the address bar
+      window.history.replaceState(null, "", "/login");
+      return;
+    }
+
     if (!hash || !hash.includes("access_token")) return;
 
     setStatus("confirming");
