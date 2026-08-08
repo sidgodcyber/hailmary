@@ -11,7 +11,7 @@ import { resolve } from "node:path";
  * This lets the adversarial RLS tests run the *actual* production policies.
  */
 
-const MIGRATIONS = ["0001_schema.sql", "0002_rls.sql", "0003_functions.sql"];
+const MIGRATIONS = ["0001_schema.sql", "0002_rls.sql", "0003_functions.sql", "0004_assets.sql"];
 
 function migrationSql(file: string): string {
   return readFileSync(resolve(process.cwd(), "supabase", "migrations", file), "utf8");

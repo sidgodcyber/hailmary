@@ -88,6 +88,12 @@ const BADGE_TONES: Record<string, string> = {
   instagram: "bg-pink-50 text-pink-700",
   whatsapp: "bg-emerald-50 text-emerald-700",
   other: "bg-stone-100 text-stone-600",
+  // asset statuses (prefixed to decouple from same-named statuses elsewhere)
+  asset_new: "bg-accent-50 text-accent-700",
+  asset_downloaded: "bg-brand-50 text-brand-700",
+  asset_editing: "bg-indigo-50 text-indigo-700",
+  asset_edited: "bg-violet-50 text-violet-700",
+  asset_used: "bg-emerald-50 text-emerald-700",
   // generic
   reference: "bg-indigo-50 text-indigo-700",
   neutral: "bg-stone-100 text-stone-600",

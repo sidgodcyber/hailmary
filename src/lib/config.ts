@@ -60,6 +60,18 @@ export const CALENDAR_STATUS_LABELS: Record<CalendarStatus, string> = {
   posted: "Posted",
 };
 
+// Raw asset (footage) tracker
+export const ASSET_STATUSES = ["new", "downloaded", "editing", "edited", "used"] as const;
+export type AssetStatus = (typeof ASSET_STATUSES)[number];
+
+export const ASSET_STATUS_LABELS: Record<AssetStatus, string> = {
+  new: "New",
+  downloaded: "Downloaded",
+  editing: "Editing",
+  edited: "Edited",
+  used: "Used",
+};
+
 // Roles
 export const ROLES = ["admin", "client"] as const;
 export type Role = (typeof ROLES)[number];

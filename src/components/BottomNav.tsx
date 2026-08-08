@@ -8,6 +8,7 @@ const TABS = [
   { href: "/app/ideas", label: "Ideas", icon: "idea" as const },
   { href: "/app/tasks", label: "Tasks", icon: "task" as const },
   { href: "/app/calendar", label: "Calendar", icon: "calendar" as const },
+  { href: "/app/assets", label: "Assets", icon: "film" as const },
   { href: "/app/activity", label: "Activity", icon: "activity" as const },
   { href: "/app/settings", label: "Settings", icon: "settings" as const },
 ];

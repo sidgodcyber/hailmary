@@ -23,6 +23,7 @@ const TASK_B = randomUUID();
 const CAL_B = randomUUID();
 const COMMENT_B = randomUUID();
 const ACT_B = randomUUID();
+const ASSET_B = randomUUID();
 
 // A tenant-A idea, to prove same-tenant access works.
 const IDEA_A = randomUUID();
@@ -69,6 +70,9 @@ beforeAll(async () => {
 
     insert into public.activity (id, tenant_id, actor_id, verb, object_type, object_id, summary) values
       ('${ACT_B}', '${T_B}', '${U_CLIENT_B}', 'idea.created', 'idea', '${IDEA_B}', 'B did a thing');
+
+    insert into public.assets (id, tenant_id, label, status, created_by) values
+      ('${ASSET_B}', '${T_B}', 'B footage', 'new', '${U_CLIENT_B}');
   `);
 });
 
@@ -97,10 +101,22 @@ describe("a logged-in client of tenant A", () => {
       ["calendar_entries", CAL_B],
       ["comments", COMMENT_B],
       ["activity", ACT_B],
+      ["assets", ASSET_B],
     ] as const) {
       const res = await pg.query(`select id from public.${table} where id = $1`, [id]);
       expect(res.rows.length, `${table} should be invisible to tenant A`).toBe(0);
     }
+  });
+
+  it("is REJECTED when inserting an asset into tenant B", async () => {
+    await expect(
+      pg.query("insert into public.assets (tenant_id, label) values ($1,$2)", [T_B, "sneaky footage"])
+    ).rejects.toThrow(/row-level security|violates/i);
+  });
+
+  it("cannot UPDATE tenant B's asset (0 rows affected)", async () => {
+    const res = await pg.query("update public.assets set status = 'used' where id = $1", [ASSET_B]);
+    expect(res.affectedRows ?? 0).toBe(0);
   });
 
   it("cannot see tenant B exists (tenants table scoped)", async () => {

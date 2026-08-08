@@ -14,7 +14,9 @@ type IconName =
   | "shield"
   | "users"
   | "check"
-  | "download";
+  | "download"
+  | "film"
+  | "arrowRight";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   idea: (
@@ -70,6 +72,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   check: <path d="M20 6 9 17l-5-5" />,
   download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" />,
+  film: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" />
+    </>
+  ),
+  arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
 };
 
 export function Icon({
