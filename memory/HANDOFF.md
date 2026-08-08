@@ -1,6 +1,48 @@
 # Hailmary — Handoff snapshot
 
-_Last refreshed: 2026-07-21 (v1.5 session 1: speed + self-serve export + auth fix)._
+_Last refreshed: 2026-08-08 (v1.5 session 2: Google auth + item 3 asset tracker)._
+
+## v1.5 SESSION 2 — shipped & verified live
+- **Google sign-in (self-serve auth)** — the real fix for the sign-in saga. `/login` has a
+  "Continue with Google" button; both admin + client are on Gmail. OAuth goes through PKCE at
+  `/auth/callback` (server-side code exchange → deterministic cookies). Browser client reverted
+  to PKCE default (the earlier `flowType: implicit` raced detectSessionInUrl and stranded users
+  on /login). Google linked to the existing admin account (providers `[email,google]`, same id,
+  admin role preserved). Google Cloud OAuth client + Supabase Google provider are configured by
+  the user. Email magic-link form kept as secondary; admin WhatsApp-invite links still work.
+  **Root cause of the whole email saga: Gmail prefetches single-use links and burns the token**
+  — see `[[magic-link-flows]]`. Google sidesteps email entirely.
+- **Region cutover DONE**: new Supabase project `kxsjwfzceiteqzbjizjv` in `ap-south-1` (Mumbai),
+  migrations applied, seeded (tasks=2, all correct). Vercel functions in `bom1`
+  (`X-Vercel-Id: bom1::bom1`). Old Seoul + stray projects deleted. Everything co-located in
+  Mumbai. `.env.local` + Vercel env updated.
+- **v1.5 item 3 — raw asset (footage) tracker — LIVE & verified.** `public.assets` table
+  (migration `0004_assets.sql`, applied), tenant-scoped RLS, adversarial tests added (**20 tests
+  pass**). `/app/assets` grouped by status; new "Assets" bottom-nav tab; Drive link + label,
+  one-tap status chain new→downloaded→editing→edited→used, note + link-to-calendar; attributed
+  activity. Verified with a real insert/constraint/delete on the live DB.
+
+## v1.5 REMAINING — items 4 & 5 (not started; plan approved)
+Full spec in the plan file's "Hailmary v1.5" section. Migrations so far go up to `0004`.
+- **Item 4 — draft approval + media on calendar** (security-critical: cross-tenant STORAGE).
+  Needs: private `media` bucket (20MB limit) + `storage.objects` RLS scoped by first path folder
+  = tenant_id; `public.attachments` table (migration `0005_attachments.sql`) + tenant RLS;
+  calendar status → idea→drafted→awaiting_approval→approved→posted + changes_requested (CHECK
+  swap); client approve / request-changes; admin sees pending at a glance; images compressed
+  client-side, video via Drive link primary + ≤20MB direct upload; signed URLs only; storage
+  usage shown in admin. **PGlite has no storage schema** — keep storage policies in a separate
+  migration NOT loaded by `tests/setup/db.ts`; test attachments-table RLS in PGlite, verify
+  storage isolation live via a signed-URL round-trip.
+- **Item 5 — voicenotes + Groq AI summaries.** Needs `GROQ_API_KEY` (user will create). Playback
+  must never depend on AI (fail soft). Verify Groq model names against live docs.
+
+## Migration application (recurring ops)
+DDL can't run via the service-role/PostgREST key — the USER pastes each new `supabase/migrations/
+*.sql` into the Supabase **SQL Editor** and runs it. Claude verifies afterward via a REST probe
+(`/rest/v1/<table>` → 200) + a real insert/constraint check.
+
+---
+_Below: v1.5 session 1 snapshot._
 
 ## v1.5 SESSION 1 — what shipped (deployed & live)
 - **Self-serve export**: `GET /api/export/data` uses the **RLS-bound** client scoped to the
