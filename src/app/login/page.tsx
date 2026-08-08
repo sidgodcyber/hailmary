@@ -79,7 +79,9 @@ function LoginForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/login?next=${encodeURIComponent(next)}`,
+        // Server-side PKCE exchange at /auth/callback → deterministic cookie +
+        // redirect. Same browser throughout, so the code_verifier is present.
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
     if (error) {
@@ -95,10 +97,10 @@ function LoginForm() {
     setStatus("sending");
     setMessage("");
     const supabase = createClient();
-    // Land back on /login, not /auth/callback: with the implicit flow the
-    // session arrives in the URL fragment, and only client-side code can read
-    // a fragment (browsers never send it to the server).
-    const redirectTo = `${window.location.origin}/login?next=${encodeURIComponent(next)}`;
+    // Same-browser PKCE exchange at /auth/callback. (Cross-device email links
+    // remain unreliable due to Gmail's link prefetch — Google sign-in is the
+    // primary path now; this email form is a secondary convenience.)
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: { emailRedirectTo: redirectTo },

@@ -3,23 +3,23 @@ import { createBrowserClient } from "@supabase/ssr";
 
 /**
  * Supabase client for Client Components (browser). ANON key only — never the
- * service role. Used for the magic-link sign-in request and sign-out.
+ * service role. Used for Google OAuth, the magic-link request, and sign-out.
  *
- * flowType: "implicit" is deliberate. @supabase/ssr defaults to PKCE, which
- * requires the `code_verifier` cookie set in the browser that REQUESTED the
- * link. Clients open sign-in emails on a phone, in Gmail's in-app browser —
- * a different browser context with no such cookie — so PKCE fails there and
- * they loop back to /login forever.
+ * PKCE flow (the default). Google sign-in and same-browser email links both go
+ * through the server route /auth/callback, which exchanges the ?code= for a
+ * session and writes the cookies deterministically — no client-side race.
  *
- * Implicit returns the session in the URL **fragment**, which /login handles
- * client-side, so a link works from any device. The usual fix (point the email
- * template at /auth/confirm + verifyOtp) is unavailable here: Supabase locks
- * email-template editing behind custom SMTP, which this project doesn't have.
+ * (An earlier `flowType: "implicit"` was reverted: its detectSessionInUrl
+ * auto-handling raced the manual fragment handler on /login and swallowed the
+ * post-OAuth redirect, leaving the user signed-in-but-stuck on /login. It also
+ * never actually fixed emailed links — those die to Gmail's link prefetch, not
+ * the flow type. Admin-invite links still arrive as implicit fragments from the
+ * verify endpoint and are handled by /login; PKCE's detectSessionInUrl ignores
+ * fragments, so there is no longer a race.)
  */
 export function createClient() {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { flowType: "implicit" } }
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 }
