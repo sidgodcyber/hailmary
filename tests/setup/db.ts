@@ -11,7 +11,21 @@ import { resolve } from "node:path";
  * This lets the adversarial RLS tests run the *actual* production policies.
  */
 
-const MIGRATIONS = ["0001_schema.sql", "0002_rls.sql", "0003_functions.sql", "0004_assets.sql"];
+/**
+ * 0006_storage.sql is deliberately NOT loaded: it writes to the `storage`
+ * schema, which only exists on hosted Supabase. Everything it relies on that
+ * CAN be tested here — public.storage_tenant_id() and the attachments
+ * path-scoping CHECK — lives in 0005 instead, so the path rule that guards the
+ * bucket is still covered. The bucket policies themselves are verified live
+ * with a signed-URL round-trip (see HANDOFF).
+ */
+const MIGRATIONS = [
+  "0001_schema.sql",
+  "0002_rls.sql",
+  "0003_functions.sql",
+  "0004_assets.sql",
+  "0005_attachments.sql",
+];
 
 function migrationSql(file: string): string {
   return readFileSync(resolve(process.cwd(), "supabase", "migrations", file), "utf8");

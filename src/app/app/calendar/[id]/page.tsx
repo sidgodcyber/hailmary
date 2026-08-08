@@ -4,8 +4,12 @@ import { requireAuth } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { BackLink, Badge } from "@/components/ui";
 import { CalendarEditor } from "@/components/calendar/CalendarEditor";
+import { ApprovalPanel } from "@/components/calendar/ApprovalPanel";
+import { MediaUploader } from "@/components/media/MediaUploader";
+import { AttachmentGallery, type AttachmentView } from "@/components/media/AttachmentGallery";
 import { CommentThread, type CommentRow } from "@/components/CommentThread";
 import { Icon } from "@/components/icons";
+import { signMediaUrls } from "@/lib/media";
 import {
   CALENDAR_CHANNEL_LABELS,
   CALENDAR_STATUS_LABELS,
@@ -23,15 +27,15 @@ export default async function CalendarDetail({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  await requireAuth();
+  const ctx = await requireAuth();
   const supabase = await createClient();
 
-  // entry and its comments both key off the route param — fetch in parallel.
-  const [entryRes, commentRes] = await Promise.all([
+  // entry, comments and attachments all key off the route param — one batch.
+  const [entryRes, commentRes, attachRes] = await Promise.all([
     supabase
       .from("calendar_entries")
       .select(
-        "*, editor:profiles!calendar_entries_updated_by_fkey(full_name, email), creator:profiles!calendar_entries_created_by_fkey(full_name, email)"
+        "*, editor:profiles!calendar_entries_updated_by_fkey(full_name, email), creator:profiles!calendar_entries_created_by_fkey(full_name, email), approver:profiles!calendar_entries_approved_by_fkey(full_name, email, global_role)"
       )
       .eq("id", id)
       .maybeSingle(),
@@ -41,13 +45,41 @@ export default async function CalendarDetail({
       .eq("parent_type", "calendar")
       .eq("parent_id", id)
       .order("created_at", { ascending: true }),
+    supabase
+      .from("attachments")
+      .select("id, tenant_id, kind, storage_path, external_url, title, size_bytes, mime, created_at")
+      .eq("parent_type", "calendar")
+      .eq("parent_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
   const entry = entryRes.data;
   if (!entry) notFound();
   const comments = (commentRes.data ?? []) as unknown as CommentRow[];
 
+  // Belt and braces: an admin's RLS spans tenants, so pin attachments to the
+  // entry's own tenant rather than trusting parent_id alone.
+  const attachmentRows = (attachRes.data ?? []).filter((a) => a.tenant_id === entry.tenant_id);
+  const signed = await signMediaUrls(
+    supabase,
+    attachmentRows.map((a) => a.storage_path).filter((p): p is string => !!p)
+  );
+  const attachments: AttachmentView[] = attachmentRows.map((a) => ({
+    id: a.id,
+    kind: a.kind,
+    storage_path: a.storage_path,
+    external_url: a.external_url,
+    title: a.title,
+    size_bytes: a.size_bytes ?? 0,
+    mime: a.mime,
+    created_at: a.created_at,
+    signedUrl: a.storage_path ? signed.get(a.storage_path) ?? null : null,
+  }));
+
   const editor = entry.editor as { full_name: string | null; email: string } | null;
+  const approver = entry.approver as
+    | { full_name: string | null; email: string; global_role: string }
+    | null;
   const back = sp.m ? `/app/calendar?m=${sp.m}` : "/app/calendar";
   const hasBrief =
     entry.brief_concept || entry.brief_hook || entry.brief_outline || entry.brief_caption;
@@ -73,6 +105,27 @@ export default async function CalendarDetail({
           </Link>
         )}
       </div>
+
+      <section className="card p-5 space-y-4">
+        <div>
+          <h2 className="font-semibold">Draft</h2>
+          <p className="mt-0.5 text-sm text-ink-muted">
+            The actual post — image, video, or a link to the cut.
+          </p>
+        </div>
+        <AttachmentGallery attachments={attachments} />
+        <MediaUploader tenantId={entry.tenant_id} parentType="calendar" parentId={entry.id} />
+      </section>
+
+      <ApprovalPanel
+        entryId={entry.id}
+        status={entry.status as CalendarStatus}
+        isAdmin={ctx.isAdmin}
+        approvedBy={approver ? displayName(approver.full_name, approver.email) : null}
+        approvedAt={entry.approved_at ?? null}
+        approverIsAdmin={approver?.global_role === "admin"}
+        hasMedia={attachments.length > 0}
+      />
 
       <section className="card p-5">
         <h2 className="font-semibold mb-3">Details</h2>

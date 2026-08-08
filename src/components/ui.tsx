@@ -82,7 +82,9 @@ const BADGE_TONES: Record<string, string> = {
   // calendar statuses
   idea_cal: "bg-brand-50 text-brand-700",
   drafted: "bg-accent-50 text-accent-700",
+  awaiting_approval: "bg-amber-100 text-amber-800",
   approved: "bg-indigo-50 text-indigo-700",
+  changes_requested: "bg-red-50 text-red-700",
   posted: "bg-emerald-50 text-emerald-700",
   // channels
   instagram: "bg-pink-50 text-pink-700",

@@ -8,8 +8,10 @@ import { logActivity } from "@/lib/activity";
 import { formatDate } from "@/lib/format";
 import {
   CALENDAR_CHANNELS,
-  CALENDAR_STATUSES,
+  CALENDAR_MANUAL_STATUSES,
+  CALENDAR_STATUS_LABELS,
   type CalendarChannel,
+  type CalendarManualStatus,
   type CalendarStatus,
 } from "@/lib/config";
 
@@ -77,13 +79,25 @@ export async function updateCalendarEntry(id: string, formData: FormData) {
   const channel = (CALENDAR_CHANNELS.includes(channelRaw as CalendarChannel)
     ? channelRaw
     : undefined) as CalendarChannel | undefined;
+  // Only idea/drafted/posted are settable here. awaiting_approval, approved and
+  // changes_requested are reachable ONLY through the approval actions below, so
+  // "Approved" on a post always means someone actually pressed approve.
   const statusRaw = str(formData, "status");
-  const status = (CALENDAR_STATUSES.includes(statusRaw as CalendarStatus)
-    ? statusRaw
-    : before.status) as CalendarStatus;
+  let status = before.status as string;
+  if (statusRaw && statusRaw !== before.status) {
+    if (!(CALENDAR_MANUAL_STATUSES as readonly string[]).includes(statusRaw)) {
+      throw new Error("That status is set through the approval flow, not here.");
+    }
+    status = statusRaw as CalendarManualStatus;
+  }
 
   const patch: Record<string, unknown> = { title, date, status, updated_by: ctx.userId };
   if (channel) patch.channel = channel;
+  // Pulling a post back out of the approval loop retires the old sign-off.
+  if (status !== before.status) {
+    patch.approved_by = null;
+    patch.approved_at = null;
+  }
 
   const { error } = await supabase.from("calendar_entries").update(patch).eq("id", id);
   if (error) throw new Error(error.message);
@@ -95,7 +109,7 @@ export async function updateCalendarEntry(id: string, formData: FormData) {
     summary = `moved “${title}” to ${formatDate(date)}`;
   } else if (status !== before.status) {
     verb = "calendar.status_changed";
-    summary = `marked “${title}” as ${status}`;
+    summary = `marked “${title}” as ${CALENDAR_STATUS_LABELS[status as CalendarStatus]}`;
   }
 
   await logActivity(supabase, {
@@ -111,4 +125,140 @@ export async function updateCalendarEntry(id: string, formData: FormData) {
   revalidatePath("/app/calendar");
   revalidatePath(`/app/calendar/${id}`);
   revalidatePath("/app/activity");
+}
+
+// ---------------------------------------------------------------------------
+// Approval loop:  drafted → awaiting_approval → approved | changes_requested
+//
+// The client is the one whose approval means something, so `approved_by` always
+// records the human who actually pressed the button. An admin can still record
+// an approval that arrived over WhatsApp — it is logged and labelled as being
+// on the client's behalf rather than being passed off as the client's own click.
+// ---------------------------------------------------------------------------
+
+async function loadEntry(supabase: Awaited<ReturnType<typeof createClient>>, id: string) {
+  // RLS-scoped: an id from another tenant simply comes back empty.
+  const { data } = await supabase
+    .from("calendar_entries")
+    .select("id, tenant_id, title, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!data) throw new Error("Not found.");
+  return data;
+}
+
+function revalidateEntry(id: string) {
+  revalidatePath("/app");
+  revalidatePath("/app/calendar");
+  revalidatePath(`/app/calendar/${id}`);
+  revalidatePath("/app/activity");
+  revalidatePath("/admin");
+}
+
+/** Studio-side: hand a draft to the client for sign-off. */
+export async function submitForApproval(entryId: string) {
+  const ctx = await requireAuth();
+  const supabase = await createClient();
+  const entry = await loadEntry(supabase, entryId);
+
+  const { error } = await supabase
+    .from("calendar_entries")
+    .update({
+      status: "awaiting_approval",
+      approved_by: null,
+      approved_at: null,
+      updated_by: ctx.userId,
+    })
+    .eq("id", entryId);
+  if (error) throw new Error(error.message);
+
+  await logActivity(supabase, {
+    tenantId: entry.tenant_id,
+    actorId: ctx.userId,
+    verb: "calendar.submitted_for_approval",
+    objectType: "calendar",
+    objectId: entryId,
+    summary: `sent “${entry.title}” for approval`,
+    payload: { id: entryId, status: "awaiting_approval" },
+  });
+
+  revalidateEntry(entryId);
+}
+
+/** Client-side sign-off (or an admin recording one that came in elsewhere). */
+export async function approveEntry(entryId: string) {
+  const ctx = await requireAuth();
+  const supabase = await createClient();
+  const entry = await loadEntry(supabase, entryId);
+
+  const { error } = await supabase
+    .from("calendar_entries")
+    .update({
+      status: "approved",
+      approved_by: ctx.userId,
+      approved_at: new Date().toISOString(),
+      updated_by: ctx.userId,
+    })
+    .eq("id", entryId);
+  if (error) throw new Error(error.message);
+
+  await logActivity(supabase, {
+    tenantId: entry.tenant_id,
+    actorId: ctx.userId,
+    verb: "calendar.approved",
+    objectType: "calendar",
+    objectId: entryId,
+    summary: ctx.isAdmin
+      ? `recorded the client's approval of “${entry.title}”`
+      : `approved “${entry.title}” ✅`,
+    payload: { id: entryId, status: "approved", onBehalf: ctx.isAdmin },
+  });
+
+  revalidateEntry(entryId);
+}
+
+/** Client-side "not yet" — the reason goes into the existing comment thread. */
+export async function requestChanges(entryId: string, formData: FormData) {
+  const ctx = await requireAuth();
+  const supabase = await createClient();
+  const entry = await loadEntry(supabase, entryId);
+
+  const note = str(formData, "body");
+  if (!note) throw new Error("Tell them what to change.");
+
+  const { error } = await supabase
+    .from("calendar_entries")
+    .update({
+      status: "changes_requested",
+      approved_by: null,
+      approved_at: null,
+      updated_by: ctx.userId,
+    })
+    .eq("id", entryId);
+  if (error) throw new Error(error.message);
+
+  // The reason lives in the normal discussion thread, so nothing is hidden in
+  // a side channel the other party has to go looking for.
+  const { error: commentError } = await supabase.from("comments").insert({
+    tenant_id: entry.tenant_id,
+    parent_type: "calendar",
+    parent_id: entryId,
+    author_id: ctx.userId,
+    body: note,
+  });
+  if (commentError) throw new Error(commentError.message);
+
+  await logActivity(supabase, {
+    tenantId: entry.tenant_id,
+    actorId: ctx.userId,
+    verb: "calendar.changes_requested",
+    objectType: "calendar",
+    objectId: entryId,
+    summary: ctx.isAdmin
+      ? `logged a change request on “${entry.title}”`
+      : `asked for changes on “${entry.title}”`,
+    payload: { id: entryId, status: "changes_requested", onBehalf: ctx.isAdmin },
+  });
+
+  revalidateEntry(entryId);
 }

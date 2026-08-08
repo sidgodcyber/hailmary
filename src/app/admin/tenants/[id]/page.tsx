@@ -5,6 +5,8 @@ import { BackLink } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { InviteClientForm } from "@/components/admin/InviteClientForm";
 import { OpenWorkspaceButton } from "@/components/admin/OpenWorkspaceButton";
+import { STORAGE_BUDGET_BYTES } from "@/lib/config";
+import { formatBytes } from "@/lib/media.client";
 import { displayName } from "@/lib/format";
 
 type Member = {
@@ -29,19 +31,24 @@ export default async function TenantDetail({ params }: { params: Promise<{ id: s
   await requireAdmin();
   const supabase = await createClient();
 
-  // tenant row, members and all counts key off the route param — one batch.
-  const [tenantRes, memberRes, ideas, tasks, calendar, activity] = await Promise.all([
+  // tenant row, members, counts and storage usage key off the route param — one batch.
+  const [tenantRes, memberRes, ideas, tasks, calendar, activity, storageRes] = await Promise.all([
     supabase.from("tenants").select("*").eq("id", id).maybeSingle(),
     supabase.from("memberships").select("role, profiles(email, full_name, global_role)").eq("tenant_id", id),
     count(supabase, "ideas", id),
     count(supabase, "tasks", id),
     count(supabase, "calendar_entries", id),
     count(supabase, "activity", id),
+    supabase.from("attachments").select("size_bytes").eq("tenant_id", id),
   ]);
 
   const tenant = tenantRes.data;
   if (!tenant) notFound();
   const members = (memberRes.data ?? []) as unknown as Member[];
+
+  const attachmentRows = storageRes.data ?? [];
+  const storageBytes = attachmentRows.reduce((sum, r) => sum + (r.size_bytes ?? 0), 0);
+  const storagePct = Math.min(100, (storageBytes / STORAGE_BUDGET_BYTES) * 100);
 
   const stats = [
     { label: "Ideas", value: ideas },
@@ -69,6 +76,26 @@ export default async function TenantDetail({ params }: { params: Promise<{ id: s
           </div>
         ))}
       </div>
+
+      <section className="card p-5">
+        <h2 className="font-semibold mb-1">Media storage</h2>
+        <p className="text-sm text-ink-muted mb-3">
+          {formatBytes(storageBytes)} across {attachmentRows.length}{" "}
+          {attachmentRows.length === 1 ? "attachment" : "attachments"} · roughly{" "}
+          {storagePct < 0.1 && storageBytes > 0 ? "<0.1" : storagePct.toFixed(1)}% of the{" "}
+          {formatBytes(STORAGE_BUDGET_BYTES)} free-tier budget.
+        </p>
+        <div
+          className="h-2 w-full overflow-hidden rounded-full bg-black/[0.06]"
+          role="img"
+          aria-label={`${formatBytes(storageBytes)} of ${formatBytes(STORAGE_BUDGET_BYTES)} used`}
+        >
+          <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.max(storagePct, storageBytes > 0 ? 1 : 0)}%` }} />
+        </div>
+        <p className="mt-2 text-xs text-ink-muted">
+          Counts uploaded images and video only — Drive links cost nothing.
+        </p>
+      </section>
 
       <section className="card p-5">
         <h2 className="font-semibold mb-3">Members</h2>

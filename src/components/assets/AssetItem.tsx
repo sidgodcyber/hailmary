@@ -7,6 +7,7 @@ import { setAssetStatus, updateAsset } from "@/app/app/assets/actions";
 import { Badge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { ASSET_STATUSES, ASSET_STATUS_LABELS, type AssetStatus } from "@/lib/config";
+import { safeExternalUrl } from "@/lib/media.client";
 import { formatDate } from "@/lib/format";
 
 export type Asset = {
@@ -40,6 +41,9 @@ export function AssetItem({ asset, calendarEntries }: { asset: Asset; calendarEn
   const router = useRouter();
   const next = nextStatus(asset.status);
   const updateAction = updateAsset.bind(null, asset.id);
+  // Never hand a raw stored value to href — a javascript: URL here would be
+  // stored XSS against whoever opens the asset list.
+  const driveHref = safeExternalUrl(asset.drive_url);
 
   function advance() {
     if (!next) return;
@@ -54,9 +58,9 @@ export function AssetItem({ asset, calendarEntries }: { asset: Asset; calendarEn
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="font-medium leading-snug">{asset.label}</p>
-          {asset.drive_url && (
+          {driveHref && (
             <a
-              href={asset.drive_url}
+              href={driveHref}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-0.5 inline-flex items-center gap-1 text-sm link"

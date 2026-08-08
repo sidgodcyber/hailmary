@@ -1,6 +1,76 @@
 # Hailmary — Handoff snapshot
 
-_Last refreshed: 2026-08-08 (v1.5 session 2: Google auth + item 3 asset tracker)._
+_Last refreshed: 2026-08-09 (v1.5 session 3: item 4 draft approval + media)._
+
+## ⚠️ ACTION REQUIRED BEFORE ITEM 4 WORKS LIVE
+Item 4 is **built, typechecked, tested (32 pass) and building clean — but not yet applied to the
+live DB.** Probed just now: `/rest/v1/assets` → 200, `/rest/v1/attachments` → **404**, bucket list
+→ **empty**. Paste these into the Supabase **SQL Editor**, in order:
+1. `supabase/migrations/0005_attachments.sql` — attachments table + RLS + `storage_tenant_id()` +
+   the calendar status CHECK swap + `approved_by/approved_at`.
+2. `supabase/migrations/0006_storage.sql` — private `media` bucket (20 MB) + `storage.objects`
+   policies. If it errors with *"must be owner of table objects"*, create the four policies via
+   Dashboard → Storage → Policies using the same expressions (they're in the file).
+
+Then say so and I'll re-probe + run a real insert/constraint check, as with 0004.
+
+## v1.5 SESSION 3 — item 4: DRAFT APPROVAL + MEDIA ON CALENDAR (code complete, DB pending)
+- **Storage model.** Private `media` bucket, path `{tenant_id}/{parent_type}/{parent_id}/{uuid}-{name}`.
+  `storage.objects` RLS keys off the FIRST path segment via `public.storage_tenant_id(name)`, which
+  returns NULL (fails closed) on a non-uuid segment rather than throwing inside a policy.
+- **Uploads go browser → Storage directly, NOT through a server action** — Vercel caps a serverless
+  request body at 4.5 MB, so a 20 MB video could never survive a server-action round trip. That
+  makes storage RLS the real gatekeeper, not a convenience.
+- **Three independent layers stop cross-tenant media** (verified, see below):
+  1. `attachments_path_tenant_scoped` CHECK — a row's `storage_path` must start with its own
+     `tenant_id || '/'`. Without this, a member of A could file a row *in their own tenant*
+     pointing at B's object and have the app sign it for them. This was the real hole.
+  2. Server action re-derives the tenant from the session (never the form) and re-validates the path.
+  3. Signing uses the **RLS-bound** client, so storage RLS refuses to sign a foreign path.
+- **`public.attachments`** (polymorphic: `idea` | `calendar`; kinds `image` | `video` | `drive`),
+  plus CHECKs for the 20 MB size cap and the stored-media-XOR-link shape.
+- **Approval loop**: `idea → drafted → awaiting_approval → approved → posted`, plus
+  `changes_requested`. `approved`/`changes_requested`/`awaiting_approval` are **unreachable from the
+  status dropdown** — server-side too, not just UI — so "Approved" always means someone pressed
+  approve. `approved_by`/`approved_at` record who actually did.
+- **Deviation from the plan, flagged:** the plan said approve/request-changes are *client-only*. As
+  written, an admin **can** press them, but it is stored and displayed as *"recorded by the studio on
+  the client's behalf"* (distinct activity verb + `onBehalf` payload + a line in the approved panel).
+  Reason: real approvals arrive over WhatsApp, and a strictly client-only button would have pushed
+  the studio to fake it with "Posted". Say the word and it becomes a hard block.
+- Client dashboard leads with "N drafts need your approval"; admin dashboard has a cross-tenant
+  "In the approval loop" list. Admin tenant detail shows media storage used vs the ~1 GB budget.
+- Images are compressed client-side (canvas → 1600px, jpeg q0.8) before upload; video is a Drive
+  link first-class, with direct upload allowed only under 20 MB. Orphaned objects (upload succeeded,
+  row insert failed) are cleaned up by the uploader's error path.
+- **Also fixed en route (pre-existing, from item 3):** `AssetItem` rendered a stored `drive_url`
+  straight into `href` — a `javascript:` URL there was stored XSS. All external links now go through
+  `safeExternalUrl()` (http/https only). Exports now include `assets` + `attachments` too.
+
+### Tests — 32 pass (was 20)
+`tests/isolation.test.ts` adds cross-tenant cases for attachments: filing a row into another tenant
+(RLS), claiming a path in another tenant's folder (CHECK), re-pointing an existing row at a foreign
+folder (CHECK), update/delete of a foreign attachment (0 rows), forged oversize/malformed rows, and
+the storage predicate itself — `is_member_of(storage_tenant_id(path))` — evaluated against real
+paths for client/admin/stranger.
+
+**Verified these tests aren't vacuous.** A probe printed which layer rejects what:
+| attempt (as tenant A's client) | rejected by |
+|---|---|
+| path in B's folder, row filed under A | `attachments_path_tenant_scoped` CHECK |
+| row filed under B directly | row-level security policy |
+| prefix confusion `{A}{B}/…` | `attachments_path_tenant_scoped` CHECK |
+| legit path in A's own folder | allowed (as intended) |
+
+**PGlite has no `storage` schema**, so `0006` is deliberately NOT loaded by `tests/setup/db.ts`.
+`storage_tenant_id()` was put in `0005` precisely so the expression the bucket policies are built on
+is still covered by tests. The bucket policies themselves still need a **live signed-URL round-trip**
+to be considered verified — not done yet (see below).
+
+### Still unverified for item 4
+- Bucket policies live (needs 0005+0006 applied, then: upload as the client, confirm a signed URL
+  works, and confirm a path under another tenant refuses to sign).
+- Any real click-through — no upload has been made against the live app yet.
 
 ## v1.5 SESSION 2 — shipped & verified live
 - **Google sign-in (self-serve auth)** — the real fix for the sign-in saga. `/login` has a
@@ -22,19 +92,14 @@ _Last refreshed: 2026-08-08 (v1.5 session 2: Google auth + item 3 asset tracker)
   one-tap status chain new→downloaded→editing→edited→used, note + link-to-calendar; attributed
   activity. Verified with a real insert/constraint/delete on the live DB.
 
-## v1.5 REMAINING — items 4 & 5 (not started; plan approved)
-Full spec in the plan file's "Hailmary v1.5" section. Migrations so far go up to `0004`.
-- **Item 4 — draft approval + media on calendar** (security-critical: cross-tenant STORAGE).
-  Needs: private `media` bucket (20MB limit) + `storage.objects` RLS scoped by first path folder
-  = tenant_id; `public.attachments` table (migration `0005_attachments.sql`) + tenant RLS;
-  calendar status → idea→drafted→awaiting_approval→approved→posted + changes_requested (CHECK
-  swap); client approve / request-changes; admin sees pending at a glance; images compressed
-  client-side, video via Drive link primary + ≤20MB direct upload; signed URLs only; storage
-  usage shown in admin. **PGlite has no storage schema** — keep storage policies in a separate
-  migration NOT loaded by `tests/setup/db.ts`; test attachments-table RLS in PGlite, verify
-  storage isolation live via a signed-URL round-trip.
+## v1.5 REMAINING — item 5 only (plan approved; migrations now go up to `0006`)
 - **Item 5 — voicenotes + Groq AI summaries.** Needs `GROQ_API_KEY` (user will create). Playback
   must never depend on AI (fail soft). Verify Groq model names against live docs.
+  Reuses item 4's storage plumbing: same `media` bucket under
+  `{tenant_id}/voicenotes/{ideaId}/…`, so the existing `storage.objects` policies already cover it
+  — the new migration only needs the `voicenotes` table + RLS. Sign playback URLs with
+  `signMediaUrls()` from `src/lib/media.ts`, and keep the same three-layer path discipline (add a
+  path-scoping CHECK on the voicenotes table too — that's what caught the real hole in item 4).
 
 ## Migration application (recurring ops)
 DDL can't run via the service-role/PostgREST key — the USER pastes each new `supabase/migrations/

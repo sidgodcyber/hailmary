@@ -38,6 +38,8 @@ export async function GET(
   zip.file("csv/calendar_entries.csv", toCsv(data.calendar_entries));
   zip.file("csv/comments.csv", toCsv(data.comments));
   zip.file("csv/activity.csv", toCsv(data.activity));
+  zip.file("csv/assets.csv", toCsv(data.assets));
+  zip.file("csv/attachments.csv", toCsv(data.attachments));
 
   const buf = await zip.generateAsync({ type: "uint8array" });
   const slug = (data.tenant.slug as string) ?? "tenant";

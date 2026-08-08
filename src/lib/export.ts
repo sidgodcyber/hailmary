@@ -15,6 +15,8 @@ export type TenantExport = {
   tasks: Record<string, unknown>[];
   calendar_entries: Record<string, unknown>[];
   activity: Record<string, unknown>[];
+  assets: Record<string, unknown>[];
+  attachments: Record<string, unknown>[];
   exported_at: string;
 };
 
@@ -22,15 +24,20 @@ export async function gatherTenantData(
   db: SupabaseClient,
   tenantId: string
 ): Promise<TenantExport> {
-  const [tenant, members, ideas, comments, tasks, calendar, activity] = await Promise.all([
-    db.from("tenants").select("*").eq("id", tenantId).maybeSingle(),
-    db.from("memberships").select("*, profiles(email, full_name, global_role)").eq("tenant_id", tenantId),
-    db.from("ideas").select("*").eq("tenant_id", tenantId).order("created_at"),
-    db.from("comments").select("*").eq("tenant_id", tenantId).order("created_at"),
-    db.from("tasks").select("*").eq("tenant_id", tenantId).order("created_at"),
-    db.from("calendar_entries").select("*").eq("tenant_id", tenantId).order("date"),
-    db.from("activity").select("*").eq("tenant_id", tenantId).order("created_at"),
-  ]);
+  const [tenant, members, ideas, comments, tasks, calendar, activity, assets, attachments] =
+    await Promise.all([
+      db.from("tenants").select("*").eq("id", tenantId).maybeSingle(),
+      db.from("memberships").select("*, profiles(email, full_name, global_role)").eq("tenant_id", tenantId),
+      db.from("ideas").select("*").eq("tenant_id", tenantId).order("created_at"),
+      db.from("comments").select("*").eq("tenant_id", tenantId).order("created_at"),
+      db.from("tasks").select("*").eq("tenant_id", tenantId).order("created_at"),
+      db.from("calendar_entries").select("*").eq("tenant_id", tenantId).order("date"),
+      db.from("activity").select("*").eq("tenant_id", tenantId).order("created_at"),
+      db.from("assets").select("*").eq("tenant_id", tenantId).order("created_at"),
+      // Metadata only. The bytes themselves stay in the private bucket — a zip
+      // of every video would blow past what a serverless function can build.
+      db.from("attachments").select("*").eq("tenant_id", tenantId).order("created_at"),
+    ]);
 
   return {
     tenant: tenant.data ?? null,
@@ -40,6 +47,8 @@ export async function gatherTenantData(
     tasks: tasks.data ?? [],
     calendar_entries: calendar.data ?? [],
     activity: activity.data ?? [],
+    assets: assets.data ?? [],
+    attachments: attachments.data ?? [],
     exported_at: new Date().toISOString(),
   };
 }
@@ -97,6 +106,27 @@ export function toMarkdown(data: TenantExport): string {
   lines.push("\n## Content calendar\n");
   for (const c of data.calendar_entries) {
     lines.push(`- ${c.date} · ${c.channel} · ${c.status} — ${c.title}`);
+  }
+
+  if (data.assets.length) {
+    lines.push("\n## Raw assets\n");
+    for (const a of data.assets) {
+      lines.push(`- ${a.status} — ${a.label}${a.drive_url ? ` (${a.drive_url})` : ""}`);
+    }
+  }
+
+  if (data.attachments.length) {
+    lines.push("\n## Attachments\n");
+    lines.push(
+      "_Metadata only — uploaded files stay in private storage and are served through short-lived signed links in the app._\n"
+    );
+    for (const at of data.attachments) {
+      lines.push(
+        `- ${at.kind} on ${at.parent_type} — ${at.title ?? "untitled"}${
+          at.external_url ? ` (${at.external_url})` : ""
+        }`
+      );
+    }
   }
 
   return lines.join("\n") + "\n";

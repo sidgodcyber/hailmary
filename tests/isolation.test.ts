@@ -24,9 +24,15 @@ const CAL_B = randomUUID();
 const COMMENT_B = randomUUID();
 const ACT_B = randomUUID();
 const ASSET_B = randomUUID();
+const ATTACH_B = randomUUID();
 
 // A tenant-A idea, to prove same-tenant access works.
 const IDEA_A = randomUUID();
+const CAL_A = randomUUID();
+
+// Object paths in the private `media` bucket. The first path segment is the
+// tenant id — that segment is the whole basis for storage access (0006).
+const PATH_B = `${T_B}/calendar/${CAL_B}/${randomUUID()}-b-draft.jpg`;
 
 let pg: TestDb;
 
@@ -63,6 +69,7 @@ beforeAll(async () => {
       ('${TASK_B}', '${T_B}', 'B task', '${U_CLIENT_B}');
 
     insert into public.calendar_entries (id, tenant_id, title, date, created_by) values
+      ('${CAL_A}', '${T_A}', 'A post', '2026-07-20', '${U_CLIENT_A}'),
       ('${CAL_B}', '${T_B}', 'B post', '2026-07-20', '${U_CLIENT_B}');
 
     insert into public.comments (id, tenant_id, parent_type, parent_id, author_id, body) values
@@ -73,6 +80,10 @@ beforeAll(async () => {
 
     insert into public.assets (id, tenant_id, label, status, created_by) values
       ('${ASSET_B}', '${T_B}', 'B footage', 'new', '${U_CLIENT_B}');
+
+    insert into public.attachments
+      (id, tenant_id, parent_type, parent_id, kind, storage_path, size_bytes, mime, created_by) values
+      ('${ATTACH_B}', '${T_B}', 'calendar', '${CAL_B}', 'image', '${PATH_B}', 2048, 'image/jpeg', '${U_CLIENT_B}');
   `);
 });
 
@@ -102,6 +113,7 @@ describe("a logged-in client of tenant A", () => {
       ["comments", COMMENT_B],
       ["activity", ACT_B],
       ["assets", ASSET_B],
+      ["attachments", ATTACH_B],
     ] as const) {
       const res = await pg.query(`select id from public.${table} where id = $1`, [id]);
       expect(res.rows.length, `${table} should be invisible to tenant A`).toBe(0);
@@ -160,6 +172,94 @@ describe("a logged-in client of tenant A", () => {
     await actAs(pg, U_CLIENT_A);
   });
 
+  // -------------------------------------------------------------------
+  // Draft media (v1.5 item 4). The dangerous case is not reading tenant B's
+  // attachment ROW — it's getting a path inside tenant B's storage folder
+  // recorded under tenant A, because the app signs URLs from that path.
+  // -------------------------------------------------------------------
+
+  it("is REJECTED when filing an attachment into tenant B", async () => {
+    await expect(
+      pg.query(
+        `insert into public.attachments (tenant_id, parent_type, parent_id, kind, storage_path)
+         values ($1,'calendar',$2,'image',$3)`,
+        [T_B, CAL_B, `${T_B}/calendar/${CAL_B}/stolen.jpg`]
+      )
+    ).rejects.toThrow(/row-level security|violates/i);
+  });
+
+  it("is REJECTED when claiming a storage path inside tenant B's folder", async () => {
+    // The row is filed under A (so RLS is satisfied) but points at B's folder.
+    // Without the CHECK constraint this would sign B's media for A.
+    await expect(
+      pg.query(
+        `insert into public.attachments (tenant_id, parent_type, parent_id, kind, storage_path)
+         values ($1,'calendar',$2,'image',$3)`,
+        [T_A, CAL_A, PATH_B]
+      )
+    ).rejects.toThrow(/attachments_path_tenant_scoped|violates check/i);
+  });
+
+  it("cannot REPOINT its own attachment at tenant B's folder afterwards", async () => {
+    const mine = await pg.query<{ id: string }>(
+      `insert into public.attachments (tenant_id, parent_type, parent_id, kind, storage_path, size_bytes)
+       values ($1,'calendar',$2,'image',$3,1024) returning id`,
+      [T_A, CAL_A, `${T_A}/calendar/${CAL_A}/mine.jpg`]
+    );
+    await expect(
+      pg.query("update public.attachments set storage_path = $1 where id = $2", [
+        PATH_B,
+        mine.rows[0]!.id,
+      ])
+    ).rejects.toThrow(/attachments_path_tenant_scoped|violates check/i);
+  });
+
+  it("cannot UPDATE or DELETE tenant B's attachment (0 rows, still present)", async () => {
+    const upd = await pg.query("update public.attachments set title = 'hijacked' where id = $1", [
+      ATTACH_B,
+    ]);
+    expect(upd.affectedRows ?? 0).toBe(0);
+
+    const del = await pg.query("delete from public.attachments where id = $1", [ATTACH_B]);
+    expect(del.affectedRows ?? 0).toBe(0);
+
+    await actAsService(pg);
+    const check = await pg.query("select id from public.attachments where id = $1", [ATTACH_B]);
+    expect(check.rows.length).toBe(1);
+    await actAs(pg, U_CLIENT_A);
+  });
+
+  it("is REJECTED when forging an oversized or malformed attachment", async () => {
+    // Size cap mirrors the bucket limit, so usage numbers can't be inflated.
+    await expect(
+      pg.query(
+        `insert into public.attachments (tenant_id, parent_type, parent_id, kind, storage_path, size_bytes)
+         values ($1,'calendar',$2,'image',$3,$4)`,
+        [T_A, CAL_A, `${T_A}/calendar/${CAL_A}/huge.jpg`, 20971521]
+      )
+    ).rejects.toThrow(/attachments_size_cap|violates check/i);
+
+    // An 'image' row with no storage_path (or a link row with both) is nonsense.
+    await expect(
+      pg.query(
+        `insert into public.attachments (tenant_id, parent_type, parent_id, kind, external_url)
+         values ($1,'calendar',$2,'image','https://example.com/x.jpg')`,
+        [T_A, CAL_A]
+      )
+    ).rejects.toThrow(/attachments_target_shape|violates check/i);
+  });
+
+  it("CAN attach media inside its own tenant folder", async () => {
+    const res = await pg.query<{ tenant_id: string; storage_path: string }>(
+      `insert into public.attachments (tenant_id, parent_type, parent_id, kind, storage_path, size_bytes, mime, created_by)
+       values ($1,'calendar',$2,'image',$3,4096,'image/jpeg',$4)
+       returning tenant_id, storage_path`,
+      [T_A, CAL_A, `${T_A}/calendar/${CAL_A}/ok.jpg`, U_CLIENT_A]
+    );
+    expect(res.rows[0]!.tenant_id).toBe(T_A);
+    expect(res.rows[0]!.storage_path.startsWith(`${T_A}/`)).toBe(true);
+  });
+
   it("CAN read and write within its own tenant A", async () => {
     const read = await pg.query("select id from public.ideas where id = $1", [IDEA_A]);
     expect(read.rows.length).toBe(1);
@@ -190,6 +290,94 @@ describe("the admin", () => {
       [T_B, "admin note on B", "allowed"]
     );
     expect(res.rows[0].tenant_id).toBe(T_B);
+  });
+});
+
+/**
+ * The `media` bucket's storage.objects policies (0006) read exactly:
+ *   is_admin() OR is_member_of(public.storage_tenant_id(name))
+ * The storage schema doesn't exist in PGlite, but that predicate is plain
+ * public-schema SQL — so evaluate it here against real object paths. This is
+ * the closest we get to testing the bucket without hosted Supabase; the bucket
+ * policies themselves still need the live signed-URL round-trip.
+ */
+describe("the storage path predicate that guards the media bucket", () => {
+  const objectPath = (tenant: string) => `${tenant}/calendar/${CAL_A}/${randomUUID()}-x.jpg`;
+
+  async function predicate(path: string): Promise<boolean> {
+    const res = await pg.query<{ ok: boolean }>(
+      "select (public.is_admin() or public.is_member_of(public.storage_tenant_id($1))) as ok",
+      [path]
+    );
+    return res.rows[0]!.ok;
+  }
+
+  it("extracts the tenant id from the first path segment", async () => {
+    await actAsService(pg);
+    const res = await pg.query<{ got: string | null }>(
+      "select public.storage_tenant_id($1)::text as got",
+      [objectPath(T_B)]
+    );
+    expect(res.rows[0]!.got).toBe(T_B);
+  });
+
+  it("returns NULL (fails closed) for a path whose first segment isn't a uuid", async () => {
+    await actAsService(pg);
+    for (const bad of ["", "public/x.jpg", "../secrets.jpg", "not-a-uuid/calendar/x.jpg"]) {
+      const res = await pg.query<{ got: string | null }>(
+        "select public.storage_tenant_id($1)::text as got",
+        [bad]
+      );
+      expect(res.rows[0]!.got, `${bad || "(empty)"} must not resolve to a tenant`).toBeNull();
+    }
+  });
+
+  it("grants tenant A's client only its own folder", async () => {
+    await actAs(pg, U_CLIENT_A);
+    expect(await predicate(objectPath(T_A))).toBe(true);
+    expect(await predicate(objectPath(T_B))).toBe(false);
+    expect(await predicate("not-a-uuid/calendar/x.jpg")).toBe(false);
+    // A uuid that is nobody's tenant must not grant access either.
+    expect(await predicate(objectPath(randomUUID()))).toBe(false);
+  });
+
+  it("grants the admin every folder, and a stranger none", async () => {
+    await actAs(pg, U_ADMIN);
+    expect(await predicate(objectPath(T_A))).toBe(true);
+    expect(await predicate(objectPath(T_B))).toBe(true);
+
+    await actAs(pg, randomUUID()); // valid-looking sub, no profile/membership
+    expect(await predicate(objectPath(T_A))).toBe(false);
+    expect(await predicate(objectPath(T_B))).toBe(false);
+  });
+});
+
+describe("the calendar approval status constraint", () => {
+  beforeAll(async () => {
+    await actAsService(pg);
+  });
+
+  it("accepts every status the app can set", async () => {
+    for (const status of [
+      "idea",
+      "drafted",
+      "awaiting_approval",
+      "approved",
+      "changes_requested",
+      "posted",
+    ]) {
+      const res = await pg.query<{ status: string }>(
+        "update public.calendar_entries set status = $1 where id = $2 returning status",
+        [status, CAL_A]
+      );
+      expect(res.rows[0]!.status).toBe(status);
+    }
+  });
+
+  it("rejects a status outside the approval vocabulary", async () => {
+    await expect(
+      pg.query("update public.calendar_entries set status = $1 where id = $2", ["yolo", CAL_A])
+    ).rejects.toThrow(/calendar_entries_status_check|violates check/i);
   });
 });
 

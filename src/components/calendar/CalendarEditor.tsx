@@ -5,7 +5,7 @@ import { updateCalendarEntry } from "@/app/app/calendar/actions";
 import {
   CALENDAR_CHANNELS,
   CALENDAR_CHANNEL_LABELS,
-  CALENDAR_STATUSES,
+  CALENDAR_MANUAL_STATUSES,
   CALENDAR_STATUS_LABELS,
   type CalendarChannel,
   type CalendarStatus,
@@ -62,10 +62,19 @@ export function CalendarEditor({ entry }: { entry: Entry }) {
         <label htmlFor="e_status" className="label">
           Status
         </label>
+        {/* Only the plain statuses live here. Awaiting-approval / approved /
+            changes-requested come from the approval panel, so "Approved" can
+            never be self-assigned from a dropdown. The current status is still
+            listed (disabled) when the post is mid-approval. */}
         <select id="e_status" name="status" defaultValue={entry.status} className="input">
-          {CALENDAR_STATUSES.map((s) => (
+          {!(CALENDAR_MANUAL_STATUSES as readonly string[]).includes(entry.status) && (
+            <option value={entry.status} disabled>
+              {CALENDAR_STATUS_LABELS[entry.status]} (set by approval)
+            </option>
+          )}
+          {CALENDAR_MANUAL_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {CALENDAR_STATUS_LABELS[s]}
+              {CALENDAR_STATUS_LABELS[s as CalendarStatus]}
             </option>
           ))}
         </select>
