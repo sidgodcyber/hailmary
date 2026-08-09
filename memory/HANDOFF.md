@@ -2,19 +2,51 @@
 
 _Last refreshed: 2026-08-09 (v1.5 session 3: item 4 draft approval + media)._
 
-## ⚠️ ACTION REQUIRED BEFORE ITEM 4 WORKS LIVE
-Item 4 is **built, typechecked, tested (32 pass) and building clean — but not yet applied to the
-live DB.** Probed just now: `/rest/v1/assets` → 200, `/rest/v1/attachments` → **404**, bucket list
-→ **empty**. Paste these into the Supabase **SQL Editor**, in order:
-1. `supabase/migrations/0005_attachments.sql` — attachments table + RLS + `storage_tenant_id()` +
-   the calendar status CHECK swap + `approved_by/approved_at`.
-2. `supabase/migrations/0006_storage.sql` — private `media` bucket (20 MB) + `storage.objects`
-   policies. If it errors with *"must be owner of table objects"*, create the four policies via
-   Dashboard → Storage → Policies using the same expressions (they're in the file).
+## v1.5 SESSION 3 — item 4: DRAFT APPROVAL + MEDIA ON CALENDAR — **LIVE & VERIFIED**
+DB state confirmed: `attachments` table + RLS, `approved_by`/`approved_at`, `storage_tenant_id()`,
+the calendar status CHECK swap, the private `media` bucket, and the storage policy are all applied.
+Storage isolation verified live (see the probe table below). Not yet done: a human click-through of
+the actual upload/approve UI in a browser.
 
-Then say so and I'll re-probe + run a real insert/constraint check, as with 0004.
+### Applying storage was NOT routine — read before touching buckets again
+`storage.objects` is owned by `supabase_storage_admin`, and on this project the SQL-Editor
+`postgres` role is **not a member of it**. BOTH SQL routes are dead ends:
+- `create policy … on storage.objects` → `ERROR 42501: must be owner of table objects`
+- `set role supabase_storage_admin` → `ERROR 42501: permission denied to set role`
 
-## v1.5 SESSION 3 — item 4: DRAFT APPROVAL + MEDIA ON CALENDAR (code complete, DB pending)
+`supabase db push` uses the same role, so it fails identically. And because the SQL Editor wraps a
+script in ONE transaction, the failing policy statements **rolled back the bucket insert above
+them** — the first run looked like it did nothing at all.
+
+What actually worked:
+- **Bucket** — created via the Storage REST API with the service-role key (`POST /storage/v1/bucket`).
+  That's not DDL, so the ownership problem doesn't apply. Claude can do this unattended.
+- **Policy** — Dashboard → Storage → Policies → "OTHER POLICIES UNDER STORAGE.OBJECTS" → New policy
+  → full customization. **User-only step; there is no API for it.** One policy `media_tenant_scoped`
+  with `FOR ALL` + both USING and WITH CHECK, rather than four per-operation policies — the
+  dashboard offers ALL and the semantics are identical.
+- `alter table storage.objects enable row level security` was **removed** from the migration: it
+  needed the same ownership and bought nothing (Supabase enables it by default).
+
+`0006_storage.sql` is now split — section 1 (bucket) is runnable SQL, section 2 (policy) is
+commented out and marked DO-NOT-RUN, holding the exact statement the dashboard generated.
+
+### Live storage isolation — `npm run probe:storage` (scripts/probe-storage.ts), 7/7 pass
+Signs in as a genuine throwaway client (real JWT + anon key — exactly what the browser holds),
+probes against the REAL Shunyethra tenant, then deletes everything it created.
+
+| probe | result |
+|---|---|
+| upload into own tenant folder | allowed |
+| upload into **another tenant's** folder | denied — RLS policy |
+| own path signs, signed URL serves the bytes | HTTP 200, byte-exact |
+| another tenant's **existing** object signs | refused — "Object not found" (won't even confirm it exists) |
+| listing another tenant's folder | 0 entries |
+| attachments row claiming a foreign path | rejected — `attachments_path_tenant_scoped` |
+
+Re-run it after any storage/RLS change; it cleans up after itself.
+
+## Item 4 — what was built
 - **Storage model.** Private `media` bucket, path `{tenant_id}/{parent_type}/{parent_id}/{uuid}-{name}`.
   `storage.objects` RLS keys off the FIRST path segment via `public.storage_tenant_id(name)`, which
   returns NULL (fails closed) on a non-uuid segment rather than throwing inside a policy.
@@ -68,9 +100,10 @@ is still covered by tests. The bucket policies themselves still need a **live si
 to be considered verified — not done yet (see below).
 
 ### Still unverified for item 4
-- Bucket policies live (needs 0005+0006 applied, then: upload as the client, confirm a signed URL
-  works, and confirm a path under another tenant refuses to sign).
-- Any real click-through — no upload has been made against the live app yet.
+- **A human click-through.** Every layer is proven at the DB/storage level, but nobody has yet
+  opened `/app/calendar/[id]` in a browser, uploaded a photo from a phone, sent it for approval and
+  approved it. Client-side image compression (canvas → 1600px) in particular has never run against
+  a real phone photo.
 
 ## v1.5 SESSION 2 — shipped & verified live
 - **Google sign-in (self-serve auth)** — the real fix for the sign-in saga. `/login` has a

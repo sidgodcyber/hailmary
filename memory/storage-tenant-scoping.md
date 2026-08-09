@@ -38,6 +38,26 @@ client / admin / stranger. The bucket policies themselves still need a live sign
 Worth repeating: when a test asserts a rejection, assert on the *constraint name*, not a generic
 "violates" — otherwise an RLS rejection silently passes a test meant to prove the CHECK works.
 
+## Applying storage changes: the SQL editor CANNOT do it
+`storage.objects` is owned by `supabase_storage_admin`, and `postgres` (what the SQL Editor and
+`supabase db push` both run as) is **not a member of it** on this project. Both routes fail:
+`create policy … on storage.objects` → `42501 must be owner of table objects`; `set role
+supabase_storage_admin` → `42501 permission denied to set role`. The SQL Editor also runs a script
+as ONE transaction, so a failing policy statement silently rolls back a bucket insert above it.
+
+So, for anything storage-related:
+- **Buckets** → Storage REST API with the service-role key (`POST /storage/v1/bucket`). Not DDL,
+  so Claude can do it unattended.
+- **Policies on storage.objects** → Dashboard → Storage → Policies → "OTHER POLICIES UNDER
+  STORAGE.OBJECTS". **User-only; no API exists.** Prefer ONE policy with `FOR ALL` + both USING and
+  WITH CHECK over four per-operation policies — identical semantics, a quarter of the typing.
+- Never include `alter table storage.objects enable row level security` — same ownership problem,
+  and Supabase already enables it.
+
+Verify with `npm run probe:storage` (`scripts/probe-storage.ts`): it signs in as a real throwaway
+client, tries to cross into the real tenant's folder, and cleans up after itself. 7/7 as of
+v1.5 item 4.
+
 ## Uploads bypass the server on purpose
 Vercel caps a serverless request body at 4.5 MB, so a 20 MB video cannot go through a server
 action. The browser uploads straight to Storage with the anon key + user session, which is why

@@ -12,6 +12,7 @@
     "test:isolation": "vitest run tests/isolation.test.ts",
     "test:watch": "vitest",
     "seed": "tsx scripts/seed.ts",
+    "probe:storage": "tsx scripts/probe-storage.ts",
     "gen:token": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "gen:types": "supabase gen types typescript --linked > src/lib/db/database.types.ts"
   },
